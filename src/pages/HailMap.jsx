@@ -657,102 +657,195 @@ export default function HailMap() {
       </div>
 
       {/* Selected Event Modal */}
-      {selectedEvent && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]" onClick={() => setSelectedEvent(null)}>
-          <div className="bg-white rounded-3xl p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <h3 className="text-2xl font-bold text-gray-900">Event Details</h3>
-                <p className="text-sm text-gray-500 mt-1">Comprehensive impact report</p>
-              </div>
-              <button 
-                onClick={() => setSelectedEvent(null)} 
-                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
-              >
-                <X className="w-6 h-6 text-gray-400" />
-              </button>
+{selectedEvent && (
+  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]" onClick={() => setSelectedEvent(null)}>
+    <div className="bg-white rounded-3xl p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900">Event Details</h3>
+          <p className="text-sm text-gray-500 mt-1">Comprehensive impact report</p>
+        </div>
+        <button 
+          onClick={() => setSelectedEvent(null)} 
+          className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+        >
+          <X className="w-6 h-6 text-gray-400" />
+        </button>
+      </div>
+      
+      {selectedEvent.loading ? (
+        <div className="text-center py-16">
+          <Loader className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+          <p className="text-sm font-semibold text-gray-700">Loading data...</p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <div className="p-4 bg-gradient-to-br from-blue-50 to-gray-50 rounded-2xl border border-blue-100">
+            <label className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 block">Location</label>
+            <p className="text-base font-semibold text-gray-900">{selectedEvent.location}, {selectedEvent.county} County, {selectedEvent.state}</p>
+          </div>
+          
+          {selectedEvent.zipCode && selectedEvent.zipCode !== 'Unknown' && (
+            <div className="p-4 bg-gradient-to-br from-green-50 to-gray-50 rounded-2xl border border-green-100">
+              <label className="text-xs font-bold text-green-700 uppercase tracking-wide mb-2 block flex items-center gap-2">
+                <MapPinIcon className="w-3 h-3" />
+                ZIP Code
+              </label>
+              <p className="text-lg font-bold text-gray-900">{selectedEvent.zipCode}</p>
+            </div>
+          )}
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 bg-gradient-to-br from-purple-50 to-gray-50 rounded-2xl border border-purple-100">
+              <label className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2 block">Time</label>
+              <p className="text-sm font-semibold text-gray-900">{selectedEvent.time}</p>
             </div>
             
-            {selectedEvent.loading ? (
-              <div className="text-center py-16">
-                <Loader className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
-                <p className="text-sm font-semibold text-gray-700">Loading property data...</p>
-                <p className="text-xs text-gray-500 mt-2">Fetching from US Census Bureau</p>
+            <div className="p-4 bg-gradient-to-br from-orange-50 to-gray-50 rounded-2xl border border-orange-100">
+              <label className="text-xs font-bold text-orange-700 uppercase tracking-wide mb-2 block">Hail Size</label>
+              <div className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full ${getSizeColor(selectedEvent.size)} shadow-sm`}></div>
+                <p className="text-sm font-bold text-gray-900">
+                  {selectedEvent.size.toFixed(2)}" 
+                </p>
               </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="p-4 bg-gradient-to-br from-blue-50 to-gray-50 rounded-2xl border border-blue-100">
-                  <label className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 block">Location</label>
-                  <p className="text-base font-semibold text-gray-900">{selectedEvent.location}, {selectedEvent.county} County, {selectedEvent.state}</p>
-                </div>
-                
-                {selectedEvent.zipCode && selectedEvent.zipCode !== 'Unknown' && (
-                  <div className="p-4 bg-gradient-to-br from-green-50 to-gray-50 rounded-2xl border border-green-100">
-                    <label className="text-xs font-bold text-green-700 uppercase tracking-wide mb-2 block flex items-center gap-2">
-                      <MapPinIcon className="w-3 h-3" />
-                      ZIP Code
-                    </label>
-                    <p className="text-lg font-bold text-gray-900">{selectedEvent.zipCode}</p>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-gradient-to-br from-purple-50 to-gray-50 rounded-2xl border border-purple-100">
-                    <label className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2 block">Time</label>
-                    <p className="text-sm font-semibold text-gray-900">{selectedEvent.time}</p>
-                  </div>
-                  
-                  <div className="p-4 bg-gradient-to-br from-orange-50 to-gray-50 rounded-2xl border border-orange-100">
-                    <label className="text-xs font-bold text-orange-700 uppercase tracking-wide mb-2 block">Hail Size</label>
-                    <div className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${getSizeColor(selectedEvent.size)} shadow-sm`}></div>
-                      <p className="text-sm font-bold text-gray-900">
-                        {selectedEvent.size.toFixed(2)}" 
-                      </p>
-                    </div>
-                    <p className="text-xs text-gray-600 mt-1">({getSizeLabel(selectedEvent.size)})</p>
-                  </div>
-                </div>
-                
-                {selectedEvent.estimatedPopulation > 0 && (
-                  <div className="p-5 bg-gradient-to-br from-yellow-50 to-gray-50 rounded-2xl border-2 border-yellow-200">
-                    <label className="text-xs font-bold text-yellow-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
-                      <Users className="w-4 h-4" />
-                      Impact Assessment
-                    </label>
-                    <p className="text-2xl font-bold text-gray-900 mb-1">
-                      ~{selectedEvent.estimatedPopulation.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-gray-600">people within 5-mile impact radius</p>
-                    <p className="text-xs text-gray-500 mt-2 italic">Based on 2020 US Census data</p>
-                  </div>
-                )}
-                
-                {selectedEvent.comments && (
-                  <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
-                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Spotter Report</label>
-                    <p className="text-sm text-gray-800 leading-relaxed">{selectedEvent.comments}</p>
-                  </div>
-                )}
-                
-                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
-                  <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Coordinates</label>
-                  <p className="text-sm font-mono text-gray-900">
-                    {selectedEvent.lat.toFixed(6)}°N, {selectedEvent.lon.toFixed(6)}°W
-                  </p>
-                </div>
-              </div>
-            )}
-            
+              <p className="text-xs text-gray-600 mt-1">({getSizeLabel(selectedEvent.size)})</p>
+            </div>
+          </div>
+          
+          {selectedEvent.estimatedPopulation > 0 && (
+            <div className="p-5 bg-gradient-to-br from-yellow-50 to-gray-50 rounded-2xl border-2 border-yellow-200">
+              <label className="text-xs font-bold text-yellow-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                Impact Assessment
+              </label>
+              <p className="text-2xl font-bold text-gray-900 mb-1">
+                ~{selectedEvent.estimatedPopulation.toLocaleString()}
+              </p>
+              <p className="text-xs text-gray-600">people within 5-mile impact radius</p>
+              <p className="text-xs text-gray-500 mt-2 italic">Based on 2020 US Census data</p>
+            </div>
+          )}
+
+          {/* Property Data Section */}
+          {!selectedEvent.propertyData ? (
             <button
-              onClick={() => setSelectedEvent(null)}
-              className="mt-6 w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 text-sm rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all font-bold shadow-lg hover:shadow-xl"
+              onClick={async () => {
+                setSelectedEvent({ ...selectedEvent, loadingProperty: true });
+                try {
+                  const response = await fetch('https://hail-spectrum-worker.alysonwalters22.workers.dev/property-lookup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lat: selectedEvent.lat, lon: selectedEvent.lon }),
+                  });
+                  const propertyData = await response.json();
+                  setSelectedEvent({ ...selectedEvent, propertyData, loadingProperty: false });
+                } catch (error) {
+                  console.error('Property lookup error:', error);
+                  setSelectedEvent({ ...selectedEvent, loadingProperty: false });
+                }
+              }}
+              disabled={selectedEvent.loadingProperty}
+              className="w-full p-5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-2xl hover:from-indigo-700 hover:to-indigo-800 transition-all font-bold shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
             >
-              Close Details
+              {selectedEvent.loadingProperty ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Loading Property Data...
+                </>
+              ) : (
+                <>
+                  🏠 View Property Details
+                </>
+              )}
             </button>
+          ) : selectedEvent.propertyData.error ? (
+            <div className="p-4 bg-red-50 rounded-2xl border border-red-200">
+              <p className="text-sm text-red-800">Property data not available for this location</p>
+            </div>
+          ) : (
+            <div className="p-5 bg-gradient-to-br from-indigo-50 to-gray-50 rounded-2xl border-2 border-indigo-200">
+              <label className="text-xs font-bold text-indigo-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
+                🏠 Property Information
+              </label>
+              <div className="space-y-2 text-sm">
+                {selectedEvent.propertyData.address && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Address:</span>
+                    <p className="text-gray-900">{selectedEvent.propertyData.address}</p>
+                  </div>
+                )}
+                {selectedEvent.propertyData.propertyType && selectedEvent.propertyData.propertyType !== 'Unknown' && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Type:</span>
+                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.propertyType}</span>
+                  </div>
+                )}
+                {selectedEvent.propertyData.yearBuilt && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Year Built:</span>
+                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.yearBuilt}</span>
+                  </div>
+                )}
+                {selectedEvent.propertyData.sqft && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Square Feet:</span>
+                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.sqft.toLocaleString()} sq ft</span>
+                  </div>
+                )}
+                {selectedEvent.propertyData.bedrooms && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Bedrooms:</span>
+                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.bedrooms}</span>
+                  </div>
+                )}
+                {selectedEvent.propertyData.bathrooms && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Bathrooms:</span>
+                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.bathrooms}</span>
+                  </div>
+                )}
+                {selectedEvent.propertyData.assessedValue && (
+                  <div className="pt-2 mt-2 border-t border-indigo-200">
+                    <span className="font-semibold text-gray-700">Assessed Value:</span>
+                    <span className="text-gray-900 ml-2 text-lg font-bold">${selectedEvent.propertyData.assessedValue.toLocaleString()}</span>
+                  </div>
+                )}
+                {selectedEvent.propertyData.marketValue && (
+                  <div>
+                    <span className="font-semibold text-gray-700">Market Value:</span>
+                    <span className="text-gray-900 ml-2 text-lg font-bold">${selectedEvent.propertyData.marketValue.toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {selectedEvent.comments && (
+            <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+              <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Spotter Report</label>
+              <p className="text-sm text-gray-800 leading-relaxed">{selectedEvent.comments}</p>
+            </div>
+          )}
+          
+          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+            <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Coordinates</label>
+            <p className="text-sm font-mono text-gray-900">
+              {selectedEvent.lat.toFixed(6)}°N, {selectedEvent.lon.toFixed(6)}°W
+            </p>
           </div>
         </div>
       )}
+      
+      <button
+        onClick={() => setSelectedEvent(null)}
+        className="mt-6 w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 text-sm rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all font-bold shadow-lg hover:shadow-xl"
+      >
+        Close Details
+      </button>
+    </div>
+  </div>
+)}
     </div>
   );
 }
