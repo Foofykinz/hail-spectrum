@@ -75,7 +75,11 @@ function MapUpdater({ events }) {
   
   return null;
 }
-
+const WEATHER_TYPES = {
+  hail: { name: 'Hail', icon: '🧊', csvSuffix: 'hail' },
+  tornado: { name: 'Tornadoes', icon: '🌪️', csvSuffix: 'torn' },
+  wind: { name: 'Wind', icon: '💨', csvSuffix: 'wind' },
+};
 export default function HailMap() {
   const [hailEvents, setHailEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -87,76 +91,51 @@ export default function HailMap() {
   const [error, setError] = useState(null);
   const [mapCenter, setMapCenter] = useState([32.7555, -97.3308]);
   const [zipFilter, setZipFilter] = useState(null);
+  const [weatherType, setWeatherType] = useState('hail');
 
   useEffect(() => {
-    fetchHailData();
-  }, [dateRange]);
+  fetchWeatherData();
+}, [dateRange, weatherType]);
 
-  const fetchHailData = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchWeatherData = async () => {
+  setLoading(true);
+  setError(null);
+  
+  if (dateRange === 'sample') {
+    loadSampleData();
+    return;
+  }
+
+  try {
+    let date = '';
+    const today = new Date();
     
-    if (dateRange === 'sample') {
-      loadSampleData();
-      return;
+    if (dateRange === 'today') date = formatDate(today);
+    else if (dateRange === 'yesterday') {
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      date = formatDate(yesterday);
+    } else if (dateRange === 'custom' && customDate) {
+      const [year, month, day] = customDate.split('-');
+      date = formatDate(new Date(year, month - 1, day));
     }
 
-    try {
-      let date = '';
-      const today = new Date();
-      
-      if (dateRange === 'today') {
-        date = formatDate(today);
-      } else if (dateRange === 'yesterday') {
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        date = formatDate(yesterday);
-      } else if (dateRange === 'custom' && customDate) {
-        const [year, month, day] = customDate.split('-');
-        const selectedDate = new Date(year, month - 1, day);
-        date = formatDate(selectedDate);
-      } else if (dateRange === 'custom' && !customDate) {
-        setError('Please select a date');
-        setLoading(false);
-        loadSampleData();
-        return;
-      }
+    const csvType = WEATHER_TYPES[weatherType].csvSuffix;
+    const response = await fetch(`https://www.spc.noaa.gov/climo/reports/${date}_rpts_filtered_${csvType}.csv`);
 
-      const response = await fetch(
-        `https://www.spc.noaa.gov/climo/reports/${date}_rpts_filtered_hail.csv`
-      );
+    if (!response.ok) throw new Error(`No ${weatherType} reports found`);
 
-      if (!response.ok) {
-        throw new Error(`No hail reports found for ${customDate || 'this date'}`);
-      }
-
-      const csvText = await response.text();
-      const events = parseSPCCSV(csvText);
-      
-      if (events.length === 0) {
-        throw new Error('No hail reports for this date');
-      }
-
-      setHailEvents(events);
-      
-      if (zipFilter) {
-        const nearby = events.filter(event => {
-          const distance = getDistance(zipFilter.lat, zipFilter.lon, event.lat, event.lon);
-          return distance <= 50;
-        });
-        setFilteredEvents(nearby);
-      } else {
-        setFilteredEvents(events);
-      }
-      
-      setLoading(false);
-      setError(null);
-    } catch (error) {
-      console.error('Error fetching hail data:', error);
-      setError(error.message + ' - Showing sample data instead');
-      loadSampleData();
-    }
-  };
+    const csvText = await response.text();
+    const events = parseSPCCSV(csvText, weatherType);
+    
+    setHailEvents(events);
+    setFilteredEvents(events);
+    setLoading(false);
+  } catch (error) {
+    setError(error.message + ' - Showing sample data');
+    loadSampleData();
+  }
+};
 
   const formatDate = (date) => {
     const year = date.getFullYear().toString().slice(-2);
@@ -165,39 +144,48 @@ export default function HailMap() {
     return `${year}${month}${day}`;
   };
 
-  const parseSPCCSV = (csv) => {
-    const lines = csv.trim().split('\n');
-    const events = [];
+const parseSPCCSV = (csv, type) => {
+  const lines = csv.trim().split('\n');
+  const events = [];
 
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
 
-      const parts = line.split(',');
-      if (parts.length >= 6) {
-        const sizeInHundredths = parseFloat(parts[1]) || 75;
-        const actualSize = sizeInHundredths / 100;
-        const lat = parseFloat(parts[5]) || 32.7555;
-        const lon = parseFloat(parts[6]) || -97.3308;
-        
-        events.push({
-          id: i,
-          time: parts[0] || 'Unknown',
-          size: actualSize,
-          location: parts[2] || 'Unknown',
-          county: parts[3] || 'Unknown',
-          state: parts[4] || 'TX',
-          lat: lat,
-          lon: lon,
-          comments: parts[7] || '',
-          zipCode: null,
-          estimatedPopulation: null,
-        });
+    const parts = line.split(',');
+    if (parts.length >= 6) {
+      let value, label;
+      
+      if (type === 'hail') {
+        value = parseFloat(parts[1]) / 100 || 0.75;
+        label = `${value.toFixed(2)}"`;
+      } else if (type === 'tornado') {
+        value = parseInt(parts[1]) || 0;
+        label = `EF${value}`;
+      } else {
+        value = parseInt(parts[1]) || 35;
+        label = `${value} mph`;
       }
+      
+      events.push({
+        id: i,
+        time: parts[0] || 'Unknown',
+        size: value,
+        label: label,
+        location: parts[2] || 'Unknown',
+        county: parts[3] || 'Unknown',
+        state: parts[4] || 'TX',
+        lat: parseFloat(parts[5]) || 32.7555,
+        lon: parseFloat(parts[6]) || -97.3308,
+        comments: parts[7] || '',
+        zipCode: null,
+        estimatedPopulation: null,
+      });
     }
+  }
+  return events;
+};
 
-    return events;
-  };
 
   const getZipAndPopulation = async (lat, lon) => {
     try {
@@ -356,6 +344,29 @@ export default function HailMap() {
             Track hail events with satellite imagery and accurate residential impact data
           </p>
         </div>
+        {/* Weather Type Toggle */}
+<div className="bg-white rounded-3xl shadow-xl p-6 mb-8 border border-gray-100">
+  <label className="block text-sm font-bold text-gray-700 mb-3">Select Event Type</label>
+  <div className="grid grid-cols-3 gap-4">
+    {Object.entries(WEATHER_TYPES).map(([key, config]) => (
+      <button
+        key={key}
+        onClick={() => {
+          setWeatherType(key);
+          setDateRange('sample');
+        }}
+        className={`p-4 rounded-2xl font-bold transition-all ${
+          weatherType === key
+            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        }`}
+      >
+        <span className="text-3xl block mb-2">{config.icon}</span>
+        {config.name}
+      </button>
+    ))}
+  </div>
+</div>
 
         {/* Error Banner */}
         {error && (
@@ -401,6 +412,18 @@ export default function HailMap() {
                   Clear filter
                 </button>
               )}
+              <button
+  onClick={async () => {
+    if (window.OneSignalDeferred) {
+      window.OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.Slidedown.promptPush();
+      });
+    }
+  }}
+  className="w-full mt-3 px-4 py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl hover:from-orange-600 hover:to-orange-700 transition-all font-semibold text-sm"
+>
+  🔔 Get Alerts for This ZIP
+</button>
             </div>
 
             {/* Date Selector */}
@@ -820,7 +843,50 @@ export default function HailMap() {
               </div>
             </div>
           )}
-          
+          <button
+  onClick={() => {
+    import('jspdf').then(({ default: jsPDF }) => {
+      import('jspdf-autotable').then(() => {
+        const doc = new jsPDF();
+        
+        doc.setFontSize(20);
+        doc.text('Hail Event Report', 20, 20);
+        
+        doc.setFontSize(12);
+        doc.text(`Location: ${selectedEvent.location}, ${selectedEvent.state}`, 20, 35);
+        doc.text(`Date: ${selectedEvent.time}`, 20, 45);
+        doc.text(`Hail Size: ${selectedEvent.size.toFixed(2)}" (${getSizeLabel(selectedEvent.size)})`, 20, 55);
+        
+        if (selectedEvent.zipCode) {
+          doc.text(`ZIP Code: ${selectedEvent.zipCode}`, 20, 65);
+        }
+        
+        if (selectedEvent.estimatedPopulation) {
+          doc.text(`Estimated Impact: ${selectedEvent.estimatedPopulation.toLocaleString()} people`, 20, 75);
+        }
+        
+        if (selectedEvent.propertyData && !selectedEvent.propertyData.error) {
+          doc.text('Property Information:', 20, 90);
+          let y = 100;
+          Object.entries(selectedEvent.propertyData).forEach(([key, value]) => {
+            if (value && key !== 'error') {
+              doc.text(`${key}: ${value}`, 25, y);
+              y += 10;
+            }
+          });
+        }
+        
+        doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, doc.internal.pageSize.height - 20);
+        doc.text('Source: HailSpectrum.com - Free Hail Tracking', 20, doc.internal.pageSize.height - 10);
+        
+        doc.save(`hail-report-${selectedEvent.zipCode || selectedEvent.location}.pdf`);
+      });
+    });
+  }}
+  className="w-full p-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl hover:from-red-700 hover:to-red-800 transition-all font-bold shadow-lg flex items-center justify-center gap-2"
+>
+  📄 Download PDF Report
+</button>
           {selectedEvent.comments && (
             <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
               <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Spotter Report</label>
