@@ -10,7 +10,7 @@ export default function Home() {
           <h1 className="text-6xl font-bold mb-6">HailSpectrum</h1>
           <p className="text-2xl mb-4 text-blue-100">Free Hail Damage Tracking</p>
           <p className="text-xl mb-10 text-blue-200 max-w-2xl mx-auto">
-            Track severe weather events with satellite imagery and accurate residential data - 100% free forever
+            Track severe weather events with satellite imagery and accurate residential data - 100% free
           </p>
           <Link to="/map" className="inline-block bg-white text-blue-600 px-10 py-5 rounded-2xl font-bold text-xl hover:bg-blue-50 transition-all shadow-2xl hover:shadow-xl transform hover:scale-105">
             Launch Hail Map →

@@ -28,7 +28,7 @@ export default function App() {
         </Routes>
         <footer className="bg-gray-900 text-white py-8 mt-20">
           <div className="max-w-7xl mx-auto px-6 text-center">
-            <p className="text-sm">© 2026 HailSpectrum • 100% Free Forever</p>
+            <p className="text-sm">© 2026 HailSpectrum • 100% Free </p>
           </div>
         </footer>
       </div>
