@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Circle, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
 import { Calendar, Ruler, Search, Filter, AlertCircle, X, Users, MapPin as MapPinIcon, Loader } from 'lucide-react';
+import { Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // Fix for default marker icons
@@ -14,16 +15,24 @@ L.Icon.Default.mergeOptions({
 
 const { BaseLayer } = LayersControl;
 
-// Create hail marker
-const createHailIcon = (size) => {
+const WEATHER_TYPES = {
+  hail: { name: 'Hail', icon: '🧊', csvSuffix: 'hail' },
+  tornado: { name: 'Tornadoes', icon: '🌪️', csvSuffix: 'torn' },
+  wind: { name: 'Wind', icon: '💨', csvSuffix: 'wind' },
+};
+
+const createWeatherIcon = (event) => {
   let color;
-  if (size >= 2) color = '#dc2626';
-  else if (size >= 1.75) color = '#f97316';
-  else if (size >= 1) color = '#eab308';
+  let label = event.label; // Use the label we already created in parseSPCCSV
+  
+  // Color coding based on event type and severity
+  if (event.size >= 2) color = '#dc2626';
+  else if (event.size >= 1.75) color = '#f97316';
+  else if (event.size >= 1) color = '#eab308';
   else color = '#22c55e';
 
   return L.divIcon({
-    className: 'custom-hail-marker',
+    className: 'custom-weather-marker',
     html: `
       <div style="position: relative; width: 40px; height: 50px;">
         <svg width="40" height="50" viewBox="0 0 40 50" xmlns="http://www.w3.org/2000/svg">
@@ -52,7 +61,7 @@ const createHailIcon = (size) => {
           white-space: nowrap;
           box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         ">
-          ${size.toFixed(1)}"
+          ${label}
         </div>
       </div>
     `,
@@ -75,12 +84,9 @@ function MapUpdater({ events }) {
   
   return null;
 }
-const WEATHER_TYPES = {
-  hail: { name: 'Hail', icon: '🧊', csvSuffix: 'hail' },
-  tornado: { name: 'Tornadoes', icon: '🌪️', csvSuffix: 'torn' },
-  wind: { name: 'Wind', icon: '💨', csvSuffix: 'wind' },
-};
+
 export default function HailMap() {
+  const [weatherType, setWeatherType] = useState('hail');
   const [hailEvents, setHailEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchZip, setSearchZip] = useState('');
@@ -91,51 +97,83 @@ export default function HailMap() {
   const [error, setError] = useState(null);
   const [mapCenter, setMapCenter] = useState([32.7555, -97.3308]);
   const [zipFilter, setZipFilter] = useState(null);
-  const [weatherType, setWeatherType] = useState('hail');
 
   useEffect(() => {
-  fetchWeatherData();
-}, [dateRange, weatherType]);
+    fetchWeatherData();
+  }, [dateRange, weatherType]);
 
   const fetchWeatherData = async () => {
-  setLoading(true);
-  setError(null);
-  
-  if (dateRange === 'sample') {
-    loadSampleData();
-    return;
-  }
-
-  try {
-    let date = '';
-    const today = new Date();
+    setLoading(true);
+    setError(null);
     
-    if (dateRange === 'today') date = formatDate(today);
-    else if (dateRange === 'yesterday') {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      date = formatDate(yesterday);
-    } else if (dateRange === 'custom' && customDate) {
-      const [year, month, day] = customDate.split('-');
-      date = formatDate(new Date(year, month - 1, day));
+    if (dateRange === 'sample') {
+      loadSampleData();
+      return;
     }
 
-    const csvType = WEATHER_TYPES[weatherType].csvSuffix;
-    const response = await fetch(`https://www.spc.noaa.gov/climo/reports/${date}_rpts_filtered_${csvType}.csv`);
+    try {
+      let date = '';
+      const today = new Date();
+      
+      if (dateRange === 'today') {
+        date = formatDate(today);
+      } else if (dateRange === 'yesterday') {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        date = formatDate(yesterday);
+      } else if (dateRange === 'custom' && customDate) {
+        const [year, month, day] = customDate.split('-');
+        const selectedDate = new Date(year, month - 1, day);
+        date = formatDate(selectedDate);
+      } else if (dateRange === 'custom' && !customDate) {
+        setError('Please select a date');
+        setLoading(false);
+        loadSampleData();
+        return;
+      }
+      let csvUrl;
+if (weatherType === 'tornado') {
+  // Use annual database for accurate EF ratings
+  const year = customDate ? customDate.split('-')[0] : new Date().getFullYear();
+  csvUrl = `https://www.spc.noaa.gov/wcm/data/${year}_torn.csv`;
+} else {
+  const csvType = WEATHER_TYPES[weatherType].csvSuffix;
+  csvUrl = `https://www.spc.noaa.gov/climo/reports/${date}_rpts_filtered_${csvType}.csv`;
+}
 
-    if (!response.ok) throw new Error(`No ${weatherType} reports found`);
+const response = await fetch(csvUrl);
 
-    const csvText = await response.text();
-    const events = parseSPCCSV(csvText, weatherType);
-    
-    setHailEvents(events);
-    setFilteredEvents(events);
-    setLoading(false);
-  } catch (error) {
-    setError(error.message + ' - Showing sample data');
-    loadSampleData();
-  }
-};
+      if (!response.ok) {
+        throw new Error(`No ${weatherType} reports found for ${customDate || 'this date'}`);
+      }
+
+      const csvText = await response.text();
+      const events = parseSPCCSV(csvText, weatherType, customDate);
+      
+      if (events.length === 0) {
+        throw new Error(`No ${weatherType} reports for this date`);
+      }
+
+      setHailEvents(events);
+      
+      if (zipFilter) {
+        const nearby = events.filter(event => {
+          const distance = getDistance(zipFilter.lat, zipFilter.lon, event.lat, event.lon);
+          return distance <= 50;
+        });
+        setFilteredEvents(nearby);
+      } else {
+        setFilteredEvents(events);
+      }
+      
+      setLoading(false);
+      setError(null);
+    } catch (error) {
+      console.error('Error fetching weather data:', error);
+      setError(error.message + ' - Showing sample data instead');
+      loadSampleData();
+    }
+  };
 
   const formatDate = (date) => {
     const year = date.getFullYear().toString().slice(-2);
@@ -144,10 +182,70 @@ export default function HailMap() {
     return `${year}${month}${day}`;
   };
 
-const parseSPCCSV = (csv, type) => {
+const parseSPCCSV = (csv, type = 'hail', selectedDate = null) => {
   const lines = csv.trim().split('\n');
   const events = [];
 
+  // Annual tornado database has different format
+  if (type === 'tornado' && csv.includes('om,yr,mo,dy')) {
+    // Get the selected date to filter by
+    const dateToFilter = selectedDate ? selectedDate.split('-') : null;
+    const selectedMonth = dateToFilter ? parseInt(dateToFilter[1]) : new Date().getMonth() + 1;
+    const selectedDay = dateToFilter ? parseInt(dateToFilter[2]) : new Date().getDate();
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const parts = line.split(',');
+      if (parts.length >= 20) {
+        const month = parseInt(parts[2]);
+        const day = parseInt(parts[3]);
+
+        // Filter to only show tornadoes from the selected date
+        if (month !== selectedMonth || day !== selectedDay) {
+          continue;
+        }
+
+        const mag = parseInt(parts[10]) || 0;
+
+        const lat = parseFloat(parts[15]) || 32.7555;
+        const lon = parseFloat(parts[16]) || -97.3308;
+
+        // ✅ Added: capture end coords (fallback to start coords)
+        const endLat = parseFloat(parts[17]) || lat;
+        const endLon = parseFloat(parts[18]) || lon;
+
+        const state = parts[7] || 'TX';
+        const county = parts[9] || 'Unknown';
+        const time = `${parts[2]}/${parts[3]}/${parts[1]} ${parts[5] || ''}`;
+        const location = `${county} County`;
+
+        events.push({
+          id: i,
+          time: time,
+          size: mag,
+          label: `EF${mag}`,
+          location: location,
+          county: county,
+          state: state,
+          lat: lat,
+          lon: lon,
+
+          // ✅ Added: store end coords on the event object
+          endLat: endLat,
+          endLon: endLon,
+
+          comments: `Length: ${parts[19] || 'Unknown'} mi, Width: ${parts[20] || 'Unknown'} yds`,
+          zipCode: null,
+          estimatedPopulation: null,
+        });
+      }
+    }
+    return events;
+  }
+
+  // Original parsing for hail and wind (daily reports)
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
@@ -155,18 +253,19 @@ const parseSPCCSV = (csv, type) => {
     const parts = line.split(',');
     if (parts.length >= 6) {
       let value, label;
-      
+
       if (type === 'hail') {
-        value = parseFloat(parts[1]) / 100 || 0.75;
-        label = `${value.toFixed(2)}"`;
-      } else if (type === 'tornado') {
-        value = parseInt(parts[1]) || 0;
-        label = `EF${value}`;
-      } else {
+        const sizeInHundredths = parseFloat(parts[1]) || 75;
+        value = sizeInHundredths / 100;
+        label = `${value.toFixed(1)}"`;
+      } else if (type === 'wind') {
         value = parseInt(parts[1]) || 35;
         label = `${value} mph`;
       }
-      
+
+      const lat = parseFloat(parts[5]) || 32.7555;
+      const lon = parseFloat(parts[6]) || -97.3308;
+
       events.push({
         id: i,
         time: parts[0] || 'Unknown',
@@ -175,14 +274,15 @@ const parseSPCCSV = (csv, type) => {
         location: parts[2] || 'Unknown',
         county: parts[3] || 'Unknown',
         state: parts[4] || 'TX',
-        lat: parseFloat(parts[5]) || 32.7555,
-        lon: parseFloat(parts[6]) || -97.3308,
+        lat: lat,
+        lon: lon,
         comments: parts[7] || '',
         zipCode: null,
         estimatedPopulation: null,
       });
     }
   }
+
   return events;
 };
 
@@ -217,6 +317,7 @@ const parseSPCCSV = (csv, type) => {
         id: 1,
         time: '14:30 CST',
         size: 1.75,
+        label: '1.75"',
         location: 'Fort Worth',
         county: 'Tarrant',
         state: 'TX',
@@ -230,6 +331,7 @@ const parseSPCCSV = (csv, type) => {
         id: 2,
         time: '15:45 CST',
         size: 1.0,
+        label: '1.0"',
         location: 'Arlington',
         county: 'Tarrant',
         state: 'TX',
@@ -243,6 +345,7 @@ const parseSPCCSV = (csv, type) => {
         id: 3,
         time: '16:20 CST',
         size: 2.5,
+        label: '2.5"',
         location: 'Dallas',
         county: 'Dallas',
         state: 'TX',
@@ -284,7 +387,7 @@ const parseSPCCSV = (csv, type) => {
       setFilteredEvents(nearby);
       
       if (nearby.length === 0) {
-        alert(`No hail events found within 50 miles of ZIP ${searchZip} for this date.`);
+        alert(`No ${weatherType} events found within 50 miles of ZIP ${searchZip} for this date.`);
       }
     } catch (error) {
       console.error('Zip search error:', error);
@@ -338,35 +441,12 @@ const parseSPCCSV = (csv, type) => {
             <span className="text-5xl">🧊</span>
           </div>
           <h1 className="text-4xl font-bold text-gray-900 mb-3">
-            Interactive Hail Damage Map
+            Interactive Severe Weather Map
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Track hail events with satellite imagery and accurate residential impact data
+            Track hail, tornadoes, and wind events with satellite imagery and residential data
           </p>
         </div>
-        {/* Weather Type Toggle */}
-<div className="bg-white rounded-3xl shadow-xl p-6 mb-8 border border-gray-100">
-  <label className="block text-sm font-bold text-gray-700 mb-3">Select Event Type</label>
-  <div className="grid grid-cols-3 gap-4">
-    {Object.entries(WEATHER_TYPES).map(([key, config]) => (
-      <button
-        key={key}
-        onClick={() => {
-          setWeatherType(key);
-          setDateRange('sample');
-        }}
-        className={`p-4 rounded-2xl font-bold transition-all ${
-          weatherType === key
-            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
-            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-        }`}
-      >
-        <span className="text-3xl block mb-2">{config.icon}</span>
-        {config.name}
-      </button>
-    ))}
-  </div>
-</div>
 
         {/* Error Banner */}
         {error && (
@@ -375,6 +455,29 @@ const parseSPCCSV = (csv, type) => {
             <p className="text-blue-900 text-sm font-medium">{error}</p>
           </div>
         )}
+
+        {/* Weather Type Toggle */}
+        <div className="bg-white rounded-3xl shadow-xl p-6 mb-8 border border-gray-100">
+          <label className="block text-sm font-bold text-gray-700 mb-3">Select Event Type</label>
+          <div className="grid grid-cols-3 gap-4">
+            {Object.entries(WEATHER_TYPES).map(([key, config]) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setWeatherType(key);
+                }}
+                className={`p-4 rounded-2xl font-bold transition-all ${
+                  weatherType === key
+                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <span className="text-3xl block mb-2">{config.icon}</span>
+                {config.name}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Search & Filter */}
         <div className="bg-white rounded-3xl shadow-xl p-6 mb-8 border border-gray-100">
@@ -412,18 +515,19 @@ const parseSPCCSV = (csv, type) => {
                   Clear filter
                 </button>
               )}
+              
               <button
-  onClick={async () => {
-    if (window.OneSignalDeferred) {
-      window.OneSignalDeferred.push(async function(OneSignal) {
-        await OneSignal.Slidedown.promptPush();
-      });
-    }
-  }}
-  className="w-full mt-3 px-4 py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl hover:from-orange-600 hover:to-orange-700 transition-all font-semibold text-sm"
->
-  🔔 Get Alerts for This ZIP
-</button>
+                onClick={async () => {
+                  if (window.OneSignalDeferred) {
+                    window.OneSignalDeferred.push(async function(OneSignal) {
+                      await OneSignal.Slidedown.promptPush();
+                    });
+                  }
+                }}
+                className="w-full mt-3 px-4 py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl hover:from-orange-600 hover:to-orange-700 transition-all font-semibold text-sm"
+              >
+                🔔 Get Alerts for This ZIP
+              </button>
             </div>
 
             {/* Date Selector */}
@@ -459,7 +563,7 @@ const parseSPCCSV = (csv, type) => {
                     className="w-full px-4 py-3 text-sm border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                   />
                   <button
-                    onClick={() => fetchHailData()}
+                    onClick={() => fetchWeatherData()}
                     className="w-full mt-3 px-4 py-3 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all font-bold shadow-md hover:shadow-lg"
                   >
                     Load Events
@@ -473,7 +577,7 @@ const parseSPCCSV = (csv, type) => {
             <div className="flex items-center justify-center bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-6 shadow-lg">
               <div className="text-center text-white">
                 <p className="text-5xl font-bold mb-2">{filteredEvents.length}</p>
-                <p className="text-sm font-semibold opacity-90">Hail Events Found</p>
+                <p className="text-sm font-semibold opacity-90">{WEATHER_TYPES[weatherType].name} Events Found</p>
               </div>
             </div>
           </div>
@@ -489,7 +593,7 @@ const parseSPCCSV = (csv, type) => {
                   <div className="text-center">
                     <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                     <p className="text-lg font-semibold text-gray-700">Loading map...</p>
-                    <p className="text-sm text-gray-500 mt-2">Fetching hail event data</p>
+                    <p className="text-sm text-gray-500 mt-2">Fetching weather event data</p>
                   </div>
                 </div>
               ) : (
@@ -518,7 +622,7 @@ const parseSPCCSV = (csv, type) => {
                     <React.Fragment key={event.id}>
                       <Marker
                         position={[event.lat, event.lon]}
-                        icon={createHailIcon(event.size)}
+                        icon={createWeatherIcon(event)}
                         eventHandlers={{
                           click: async () => {
                             setSelectedEvent({ ...event, loading: true });
@@ -540,7 +644,7 @@ const parseSPCCSV = (csv, type) => {
                             <div className="flex items-center gap-2">
                               <div className={`w-3 h-3 rounded-full ${getSizeColor(event.size)}`}></div>
                               <p className="text-sm font-bold text-gray-800">
-                                {event.size.toFixed(2)}" ({getSizeLabel(event.size)})
+                                {event.label}
                               </p>
                             </div>
                           </div>
@@ -557,6 +661,28 @@ const parseSPCCSV = (csv, type) => {
                           opacity: 0.4,
                         }}
                       />
+                      <Circle
+                        center={[event.lat, event.lon]}
+                        radius={8046.72}
+                        pathOptions={{
+                          color: '#3b82f6',
+                          fillColor: '#3b82f6',
+                          fillOpacity: 0.08,
+                          weight: 2,
+                          opacity: 0.4,
+                        }}
+                      />
+                      
+                      {weatherType === 'tornado' && event.endLat && event.endLon && (
+                        <Polyline
+                          positions={[[event.lat, event.lon], [event.endLat, event.endLon]]}
+                          pathOptions={{
+                            color: '#dc2626',
+                            weight: 4,
+                            opacity: 0.7,
+                          }}
+                        />
+                      )}
                     </React.Fragment>
                   ))}
                 </MapContainer>
@@ -580,7 +706,7 @@ const parseSPCCSV = (csv, type) => {
               ) : filteredEvents.length === 0 ? (
                 <div className="text-center py-16 bg-gray-50 rounded-2xl">
                   <div className="text-4xl mb-3">🔍</div>
-                  <p className="text-sm font-semibold text-gray-700">No hail events found</p>
+                  <p className="text-sm font-semibold text-gray-700">No events found</p>
                   <p className="text-xs text-gray-500 mt-2">Try a different date or location</p>
                 </div>
               ) : (
@@ -613,7 +739,7 @@ const parseSPCCSV = (csv, type) => {
                           </div>
                           <div className="flex items-center gap-2 text-xs font-semibold text-gray-700">
                             <Ruler className="w-3 h-3" />
-                            <span>{event.size.toFixed(2)}" ({getSizeLabel(event.size)})</span>
+                            <span>{event.label}</span>
                           </div>
                         </div>
                       </div>
@@ -680,238 +806,240 @@ const parseSPCCSV = (csv, type) => {
       </div>
 
       {/* Selected Event Modal */}
-{selectedEvent && (
-  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]" onClick={() => setSelectedEvent(null)}>
-    <div className="bg-white rounded-3xl p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h3 className="text-2xl font-bold text-gray-900">Event Details</h3>
-          <p className="text-sm text-gray-500 mt-1">Comprehensive impact report</p>
-        </div>
-        <button 
-          onClick={() => setSelectedEvent(null)} 
-          className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
-        >
-          <X className="w-6 h-6 text-gray-400" />
-        </button>
-      </div>
-      
-      {selectedEvent.loading ? (
-        <div className="text-center py-16">
-          <Loader className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-sm font-semibold text-gray-700">Loading data...</p>
-        </div>
-      ) : (
-        <div className="space-y-5">
-          <div className="p-4 bg-gradient-to-br from-blue-50 to-gray-50 rounded-2xl border border-blue-100">
-            <label className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 block">Location</label>
-            <p className="text-base font-semibold text-gray-900">{selectedEvent.location}, {selectedEvent.county} County, {selectedEvent.state}</p>
-          </div>
-          
-          {selectedEvent.zipCode && selectedEvent.zipCode !== 'Unknown' && (
-            <div className="p-4 bg-gradient-to-br from-green-50 to-gray-50 rounded-2xl border border-green-100">
-              <label className="text-xs font-bold text-green-700 uppercase tracking-wide mb-2 block flex items-center gap-2">
-                <MapPinIcon className="w-3 h-3" />
-                ZIP Code
-              </label>
-              <p className="text-lg font-bold text-gray-900">{selectedEvent.zipCode}</p>
-            </div>
-          )}
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="p-4 bg-gradient-to-br from-purple-50 to-gray-50 rounded-2xl border border-purple-100">
-              <label className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2 block">Time</label>
-              <p className="text-sm font-semibold text-gray-900">{selectedEvent.time}</p>
+      {selectedEvent && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]" onClick={() => setSelectedEvent(null)}>
+          <div className="bg-white rounded-3xl p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">Event Details</h3>
+                <p className="text-sm text-gray-500 mt-1">Comprehensive impact report</p>
+              </div>
+              <button 
+                onClick={() => setSelectedEvent(null)} 
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+              >
+                <X className="w-6 h-6 text-gray-400" />
+              </button>
             </div>
             
-            <div className="p-4 bg-gradient-to-br from-orange-50 to-gray-50 rounded-2xl border border-orange-100">
-              <label className="text-xs font-bold text-orange-700 uppercase tracking-wide mb-2 block">Hail Size</label>
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${getSizeColor(selectedEvent.size)} shadow-sm`}></div>
-                <p className="text-sm font-bold text-gray-900">
-                  {selectedEvent.size.toFixed(2)}" 
-                </p>
+            {selectedEvent.loading ? (
+              <div className="text-center py-16">
+                <Loader className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+                <p className="text-sm font-semibold text-gray-700">Loading data...</p>
               </div>
-              <p className="text-xs text-gray-600 mt-1">({getSizeLabel(selectedEvent.size)})</p>
-            </div>
-          </div>
-          
-          {selectedEvent.estimatedPopulation > 0 && (
-            <div className="p-5 bg-gradient-to-br from-yellow-50 to-gray-50 rounded-2xl border-2 border-yellow-200">
-              <label className="text-xs font-bold text-yellow-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                Impact Assessment
-              </label>
-              <p className="text-2xl font-bold text-gray-900 mb-1">
-                ~{selectedEvent.estimatedPopulation.toLocaleString()}
-              </p>
-              <p className="text-xs text-gray-600">people within 5-mile impact radius</p>
-              <p className="text-xs text-gray-500 mt-2 italic">Based on 2020 US Census data</p>
-            </div>
-          )}
+            ) : (
+              <div className="space-y-5">
+                <div className="p-4 bg-gradient-to-br from-blue-50 to-gray-50 rounded-2xl border border-blue-100">
+                  <label className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2 block">Location</label>
+                  <p className="text-base font-semibold text-gray-900">{selectedEvent.location}, {selectedEvent.county} County, {selectedEvent.state}</p>
+                </div>
+                
+                {selectedEvent.zipCode && selectedEvent.zipCode !== 'Unknown' && (
+                  <div className="p-4 bg-gradient-to-br from-green-50 to-gray-50 rounded-2xl border border-green-100">
+                    <label className="text-xs font-bold text-green-700 uppercase tracking-wide mb-2 block flex items-center gap-2">
+                      <MapPinIcon className="w-3 h-3" />
+                      ZIP Code
+                    </label>
+                    <p className="text-lg font-bold text-gray-900">{selectedEvent.zipCode}</p>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-gradient-to-br from-purple-50 to-gray-50 rounded-2xl border border-purple-100">
+                    <label className="text-xs font-bold text-purple-700 uppercase tracking-wide mb-2 block">Time</label>
+                    <p className="text-sm font-semibold text-gray-900">{selectedEvent.time}</p>
+                  </div>
+                  
+                  <div className="p-4 bg-gradient-to-br from-orange-50 to-gray-50 rounded-2xl border border-orange-100">
+                    <label className="text-xs font-bold text-orange-700 uppercase tracking-wide mb-2 block">{WEATHER_TYPES[weatherType].name}</label>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${getSizeColor(selectedEvent.size)} shadow-sm`}></div>
+                      <p className="text-sm font-bold text-gray-900">
+                        {selectedEvent.label}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                {selectedEvent.estimatedPopulation > 0 && (
+                  <div className="p-5 bg-gradient-to-br from-yellow-50 to-gray-50 rounded-2xl border-2 border-yellow-200">
+                    <label className="text-xs font-bold text-yellow-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
+                      <Users className="w-4 h-4" />
+                      Impact Assessment
+                    </label>
+                    <p className="text-2xl font-bold text-gray-900 mb-1">
+                      ~{selectedEvent.estimatedPopulation.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-600">people within 5-mile impact radius</p>
+                    <p className="text-xs text-gray-500 mt-2 italic">Based on 2020 US Census data</p>
+                  </div>
+                )}
 
-          {/* Property Data Section */}
-          {!selectedEvent.propertyData ? (
-            <button
-              onClick={async () => {
-                setSelectedEvent({ ...selectedEvent, loadingProperty: true });
-                try {
-                  const response = await fetch('https://hail-spectrum-worker.alysonwalters22.workers.dev/property-lookup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ lat: selectedEvent.lat, lon: selectedEvent.lon }),
-                  });
-                  const propertyData = await response.json();
-                  setSelectedEvent({ ...selectedEvent, propertyData, loadingProperty: false });
-                } catch (error) {
-                  console.error('Property lookup error:', error);
-                  setSelectedEvent({ ...selectedEvent, loadingProperty: false });
-                }
-              }}
-              disabled={selectedEvent.loadingProperty}
-              className="w-full p-5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-2xl hover:from-indigo-700 hover:to-indigo-800 transition-all font-bold shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
-            >
-              {selectedEvent.loadingProperty ? (
-                <>
-                  <Loader className="w-5 h-5 animate-spin" />
-                  Loading Property Data...
-                </>
-              ) : (
-                <>
-                  🏠 View Property Details
-                </>
-              )}
-            </button>
-          ) : selectedEvent.propertyData.error ? (
-            <div className="p-4 bg-red-50 rounded-2xl border border-red-200">
-              <p className="text-sm text-red-800">Property data not available for this location</p>
-            </div>
-          ) : (
-            <div className="p-5 bg-gradient-to-br from-indigo-50 to-gray-50 rounded-2xl border-2 border-indigo-200">
-              <label className="text-xs font-bold text-indigo-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
-                🏠 Property Information
-              </label>
-              <div className="space-y-2 text-sm">
-                {selectedEvent.propertyData.address && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Address:</span>
-                    <p className="text-gray-900">{selectedEvent.propertyData.address}</p>
+                {/* Property Data Section */}
+                {!selectedEvent.propertyData ? (
+                  <button
+                    onClick={async () => {
+                      setSelectedEvent({ ...selectedEvent, loadingProperty: true });
+                      try {
+                        const response = await fetch('https://hail-spectrum-worker.alysonwalters22.workers.dev/property-lookup', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ lat: selectedEvent.lat, lon: selectedEvent.lon }),
+                        });
+                        const propertyData = await response.json();
+                        setSelectedEvent({ ...selectedEvent, propertyData, loadingProperty: false });
+                      } catch (error) {
+                        console.error('Property lookup error:', error);
+                        setSelectedEvent({ ...selectedEvent, loadingProperty: false });
+                      }
+                    }}
+                    disabled={selectedEvent.loadingProperty}
+                    className="w-full p-5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-2xl hover:from-indigo-700 hover:to-indigo-800 transition-all font-bold shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                  >
+                    {selectedEvent.loadingProperty ? (
+                      <>
+                        <Loader className="w-5 h-5 animate-spin" />
+                        Loading Property Data...
+                      </>
+                    ) : (
+                      <>
+                        🏠 View Property Details
+                      </>
+                    )}
+                  </button>
+                ) : selectedEvent.propertyData.error ? (
+                  <div className="p-4 bg-red-50 rounded-2xl border border-red-200">
+                    <p className="text-sm text-red-800">Property data not available for this location</p>
+                  </div>
+                ) : (
+                  <div className="p-5 bg-gradient-to-br from-indigo-50 to-gray-50 rounded-2xl border-2 border-indigo-200">
+                    <label className="text-xs font-bold text-indigo-800 uppercase tracking-wide mb-3 block flex items-center gap-2">
+                      🏠 Property Information
+                    </label>
+                    <div className="space-y-2 text-sm">
+                      {selectedEvent.propertyData.address && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Address:</span>
+                          <p className="text-gray-900">{selectedEvent.propertyData.address}</p>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.propertyType && selectedEvent.propertyData.propertyType !== 'Unknown' && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Type:</span>
+                          <span className="text-gray-900 ml-2">{selectedEvent.propertyData.propertyType}</span>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.yearBuilt && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Year Built:</span>
+                          <span className="text-gray-900 ml-2">{selectedEvent.propertyData.yearBuilt}</span>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.sqft && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Square Feet:</span>
+                          <span className="text-gray-900 ml-2">{selectedEvent.propertyData.sqft.toLocaleString()} sq ft</span>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.bedrooms && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Bedrooms:</span>
+                          <span className="text-gray-900 ml-2">{selectedEvent.propertyData.bedrooms}</span>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.bathrooms && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Bathrooms:</span>
+                          <span className="text-gray-900 ml-2">{selectedEvent.propertyData.bathrooms}</span>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.assessedValue && (
+                        <div className="pt-2 mt-2 border-t border-indigo-200">
+                          <span className="font-semibold text-gray-700">Assessed Value:</span>
+                          <span className="text-gray-900 ml-2 text-lg font-bold">${selectedEvent.propertyData.assessedValue.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {selectedEvent.propertyData.marketValue && (
+                        <div>
+                          <span className="font-semibold text-gray-700">Market Value:</span>
+                          <span className="text-gray-900 ml-2 text-lg font-bold">${selectedEvent.propertyData.marketValue.toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-                {selectedEvent.propertyData.propertyType && selectedEvent.propertyData.propertyType !== 'Unknown' && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Type:</span>
-                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.propertyType}</span>
+
+                {/* PDF Export Button */}
+                <button
+                  onClick={() => {
+                    import('jspdf').then(({ default: jsPDF }) => {
+                      import('jspdf-autotable').then(() => {
+                        const doc = new jsPDF();
+                        
+                        doc.setFontSize(20);
+                        doc.text(`${WEATHER_TYPES[weatherType].name} Event Report`, 20, 20);
+                        
+                        doc.setFontSize(12);
+                        doc.text(`Location: ${selectedEvent.location}, ${selectedEvent.state}`, 20, 35);
+                        doc.text(`Date: ${selectedEvent.time}`, 20, 45);
+                        doc.text(`${WEATHER_TYPES[weatherType].name}: ${selectedEvent.label}`, 20, 55);
+                        
+                        if (selectedEvent.zipCode) {
+                          doc.text(`ZIP Code: ${selectedEvent.zipCode}`, 20, 65);
+                        }
+                        
+                        if (selectedEvent.estimatedPopulation) {
+                          doc.text(`Estimated Impact: ${selectedEvent.estimatedPopulation.toLocaleString()} people`, 20, 75);
+                        }
+                        
+                        if (selectedEvent.propertyData && !selectedEvent.propertyData.error) {
+                          doc.text('Property Information:', 20, 90);
+                          let y = 100;
+                          Object.entries(selectedEvent.propertyData).forEach(([key, value]) => {
+                            if (value && key !== 'error') {
+                              doc.text(`${key}: ${value}`, 25, y);
+                              y += 10;
+                            }
+                          });
+                        }
+                        
+                        doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, doc.internal.pageSize.height - 20);
+                        doc.text('Source: HailSpectrum.com - Free Severe Weather Tracking', 20, doc.internal.pageSize.height - 10);
+                        
+                        doc.save(`${weatherType}-report-${selectedEvent.zipCode || selectedEvent.location}.pdf`);
+                      });
+                    });
+                  }}
+                  className="w-full p-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl hover:from-red-700 hover:to-red-800 transition-all font-bold shadow-lg flex items-center justify-center gap-2"
+                >
+                  📄 Download PDF Report
+                </button>
+                
+                {selectedEvent.comments && (
+                  <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Spotter Report</label>
+                    <p className="text-sm text-gray-800 leading-relaxed">{selectedEvent.comments}</p>
                   </div>
                 )}
-                {selectedEvent.propertyData.yearBuilt && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Year Built:</span>
-                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.yearBuilt}</span>
-                  </div>
-                )}
-                {selectedEvent.propertyData.sqft && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Square Feet:</span>
-                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.sqft.toLocaleString()} sq ft</span>
-                  </div>
-                )}
-                {selectedEvent.propertyData.bedrooms && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Bedrooms:</span>
-                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.bedrooms}</span>
-                  </div>
-                )}
-                {selectedEvent.propertyData.bathrooms && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Bathrooms:</span>
-                    <span className="text-gray-900 ml-2">{selectedEvent.propertyData.bathrooms}</span>
-                  </div>
-                )}
-                {selectedEvent.propertyData.assessedValue && (
-                  <div className="pt-2 mt-2 border-t border-indigo-200">
-                    <span className="font-semibold text-gray-700">Assessed Value:</span>
-                    <span className="text-gray-900 ml-2 text-lg font-bold">${selectedEvent.propertyData.assessedValue.toLocaleString()}</span>
-                  </div>
-                )}
-                {selectedEvent.propertyData.marketValue && (
-                  <div>
-                    <span className="font-semibold text-gray-700">Market Value:</span>
-                    <span className="text-gray-900 ml-2 text-lg font-bold">${selectedEvent.propertyData.marketValue.toLocaleString()}</span>
-                  </div>
-                )}
+                
+                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
+                  <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Coordinates</label>
+                  <p className="text-sm font-mono text-gray-900">
+                    {selectedEvent.lat.toFixed(6)}°N, {selectedEvent.lon.toFixed(6)}°W
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
-          <button
-  onClick={() => {
-    import('jspdf').then(({ default: jsPDF }) => {
-      import('jspdf-autotable').then(() => {
-        const doc = new jsPDF();
-        
-        doc.setFontSize(20);
-        doc.text('Hail Event Report', 20, 20);
-        
-        doc.setFontSize(12);
-        doc.text(`Location: ${selectedEvent.location}, ${selectedEvent.state}`, 20, 35);
-        doc.text(`Date: ${selectedEvent.time}`, 20, 45);
-        doc.text(`Hail Size: ${selectedEvent.size.toFixed(2)}" (${getSizeLabel(selectedEvent.size)})`, 20, 55);
-        
-        if (selectedEvent.zipCode) {
-          doc.text(`ZIP Code: ${selectedEvent.zipCode}`, 20, 65);
-        }
-        
-        if (selectedEvent.estimatedPopulation) {
-          doc.text(`Estimated Impact: ${selectedEvent.estimatedPopulation.toLocaleString()} people`, 20, 75);
-        }
-        
-        if (selectedEvent.propertyData && !selectedEvent.propertyData.error) {
-          doc.text('Property Information:', 20, 90);
-          let y = 100;
-          Object.entries(selectedEvent.propertyData).forEach(([key, value]) => {
-            if (value && key !== 'error') {
-              doc.text(`${key}: ${value}`, 25, y);
-              y += 10;
-            }
-          });
-        }
-        
-        doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, doc.internal.pageSize.height - 20);
-        doc.text('Source: HailSpectrum.com - Free Hail Tracking', 20, doc.internal.pageSize.height - 10);
-        
-        doc.save(`hail-report-${selectedEvent.zipCode || selectedEvent.location}.pdf`);
-      });
-    });
-  }}
-  className="w-full p-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl hover:from-red-700 hover:to-red-800 transition-all font-bold shadow-lg flex items-center justify-center gap-2"
->
-  📄 Download PDF Report
-</button>
-          {selectedEvent.comments && (
-            <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
-              <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Spotter Report</label>
-              <p className="text-sm text-gray-800 leading-relaxed">{selectedEvent.comments}</p>
-            </div>
-          )}
-          
-          <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200">
-            <label className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 block">Coordinates</label>
-            <p className="text-sm font-mono text-gray-900">
-              {selectedEvent.lat.toFixed(6)}°N, {selectedEvent.lon.toFixed(6)}°W
-            </p>
+            )}
+            
+            <button
+              onClick={() => setSelectedEvent(null)}
+              className="mt-6 w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 text-sm rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all font-bold shadow-lg hover:shadow-xl"
+            >
+              Close Details
+            </button>
           </div>
         </div>
       )}
-      
-      <button
-        onClick={() => setSelectedEvent(null)}
-        className="mt-6 w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 text-sm rounded-2xl hover:from-blue-700 hover:to-blue-800 transition-all font-bold shadow-lg hover:shadow-xl"
-      >
-        Close Details
-      </button>
-    </div>
-  </div>
-)}
     </div>
   );
 }
